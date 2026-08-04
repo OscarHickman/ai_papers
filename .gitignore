@@ -103,6 +103,9 @@ user_credentials/
 # Data and uploads
 data/.secret_key
 data/uploads/
+*.db-wal
+*.db-shm
+*.db-journal
 
 # IDE
 .vscode/

@@ -18,8 +18,13 @@ class PaperDatabase:
     def __init__(self, db_path: str | Path, simulation_codes: list[str] | None = None):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA busy_timeout=10000;")
+        except Exception as e:
+            logger.warning(f"Could not set SQLite WAL mode or busy timeout: {e}")
         self.simulation_codes = simulation_codes or [
             "IllustrisTNG", "CAMELS", "EAGLE", "Millennium", "GADGET",
             "RAMSES", "GALFORM", "CAMB", "CLASS", "Cobaya", "emcee",
