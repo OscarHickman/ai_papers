@@ -27,6 +27,19 @@ def load_config_file(config_path: str = "config.yaml") -> dict:
     with open(path) as f:
         return yaml.safe_load(f) or {}
 
+def save_config_file(config: dict, config_path: str = "config.yaml") -> bool:
+    """Save configuration dictionary back to YAML file safely."""
+    try:
+        path = Path(config_path)
+        temp_path = path.with_suffix(".yaml.tmp")
+        with open(temp_path, "w") as f:
+            yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+        temp_path.replace(path)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save config file '{config_path}': {e}")
+        return False
+
 def get_validated_config(config_path: str = "config.yaml") -> dict:
     """Load, merge secrets from env/legacy files, and validate config against JSON Schema.
     

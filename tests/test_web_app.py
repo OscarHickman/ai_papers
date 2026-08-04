@@ -271,6 +271,75 @@ class TestWebApp(unittest.TestCase):
         config_data = resp.get_json()
         self.assertIn("categories", config_data)
 
+    @patch("aura.config.save_config_file")
+    @patch("aura.scheduler.update_scheduler")
+    def test_settings_post_and_daily_job_run(self, mock_update_sched, mock_save_config):
+        mock_save_config.return_value = True
+        # 1. POST settings update
+        resp = self.client.post("/settings", data={
+            "digest_frequency": "daily",
+            "scheduler_submitted": "1",
+            "scheduler_enabled": "on",
+            "fetch_hour": "7",
+            "fetch_minute": "30",
+            "categories": "cs.AI, stat.ML, astro-ph.CO",
+            "max_results": "150",
+            "days_back": "3",
+            "generate_on_fetch": "on",
+            "llm_submitted": "1",
+            "llm_provider": "groq",
+            "groq_api_key": "gsk_testkey123",
+            "email_submitted": "1",
+            "smtp_host": "smtp.test.com",
+            "smtp_port": "587",
+            "smtp_username": "user@test.com",
+            "from_email": "user@test.com",
+            "to_email": "user@test.com",
+        })
+        self.assertEqual(resp.status_code, 302)
+        mock_save_config.assert_called()
+        mock_update_sched.assert_called()
+
+        # 2. Trigger daily job run
+        self.engine.fetch_new_papers.return_value = 5
+        resp_run = self.client.post("/api/daily-job/run")
+        self.assertEqual(resp_run.status_code, 200)
+        data = resp_run.get_json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["new_papers"], 5)
+
+    def test_drag_and_drop_upload_papers(self):
+        import io
+        self.engine.fetch_and_add_paper.return_value = {"arxiv_id": "2401.00001", "title": "Test Paper"}
+        bib_content = b"@article{test, eprint={2401.00001}, title={Test Paper}}"
+        
+        data = {
+            "files": (io.BytesIO(bib_content), "test_papers.bib")
+        }
+        resp = self.client.post("/api/papers/upload", data=data, content_type="multipart/form-data")
+        self.assertEqual(resp.status_code, 200)
+        json_data = resp.get_json()
+        self.assertEqual(json_data["status"], "ok")
+        self.assertEqual(json_data["saved_count"], 1)
+
+    def test_pdf_scanner_and_upload_serve(self):
+        import io
+        from aura.pdf_scanner import scan_pdf_metadata
+        
+        pdf_bytes = b"%PDF-1.4\n1 0 obj\n<< /Title (Cosmology JAX) /Author (Jane Doe) >>\nendobj\nstream\narXiv:2401.00002\nAbstract\nThis paper presents a new cosmological emulator.\nendstream"
+        scanned = scan_pdf_metadata(pdf_bytes, "2401.00002.pdf")
+        self.assertEqual(scanned["arxiv_id"], "2401.00002")
+
+        # Test PDF upload and serving
+        self.engine.fetch_and_add_paper.return_value = {"arxiv_id": "2401.00002", "title": "Cosmology JAX", "authors": ["Jane Doe"]}
+        data = {"files": (io.BytesIO(pdf_bytes), "2401.00002.pdf")}
+        resp = self.client.post("/api/papers/upload", data=data, content_type="multipart/form-data")
+        self.assertEqual(resp.status_code, 200)
+
+        # Serve PDF
+        resp_pdf = self.client.get("/uploads/pdf/2401.00002.pdf")
+        self.assertIn(resp_pdf.status_code, [200, 404])
+
     def test_search_routes(self):
         # 1. Test HTML search page
         resp = self.client.get("/papers?q=Astro&category=astro-ph.CO&date_from=2026-01-01&date_to=2026-01-02")

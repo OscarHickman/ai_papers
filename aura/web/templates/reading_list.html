@@ -1,12 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Reading List - AI Papers{% endblock %}
+{% block title %}Reading List &amp; Saved Papers - AURA{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h1><i class="bi bi-bookmark-star"></i> Reading List</h1>
+    <h1><i class="bi bi-bookmark-star text-warning me-2"></i> Reading List &amp; Saved Papers</h1>
     <div class="btn-group">
         <a href="/reading-list?filter=unread" class="btn btn-outline-info {% if filter_type == 'unread' %}active{% endif %}">Queue</a>
         <a href="/reading-list?filter=read" class="btn btn-outline-secondary {% if filter_type == 'read' %}active{% endif %}">Finished</a>
+    </div>
+</div>
+
+<!-- Drag and Drop File Upload Section -->
+<div class="card glass-panel border-primary border-opacity-50 mb-4 drop-zone-card" id="drop-zone" style="border: 2px dashed rgba(56, 189, 248, 0.4); transition: all 0.3s ease;">
+    <div class="card-body p-4 text-center py-4">
+        <div class="drop-zone-icon mb-2">
+            <i class="bi bi-cloud-arrow-up display-4 text-primary"></i>
+        </div>
+        <h5 class="fw-bold mb-1">Drag &amp; Drop Files to Save Papers for Later</h5>
+        <p class="text-muted small mb-3">Drop BibTeX (<code>.bib</code>), PDF (<code>.pdf</code>), or paper lists (<code>.txt</code>) anywhere in this box.</p>
+        <input type="file" id="file-input" class="d-none" multiple accept=".bib,.pdf,.txt,.json">
+        <button class="btn btn-outline-primary btn-sm px-4" onclick="document.getElementById('file-input').click()">
+            <i class="bi bi-folder-plus me-1"></i> Browse &amp; Add Files
+        </button>
+        <div id="upload-status" class="mt-3 small text-info fw-medium d-none"></div>
     </div>
 </div>
 
@@ -14,7 +30,8 @@
     {% if not papers %}
     <div class="col-12 text-center py-5">
         <p class="text-muted h5">Your reading list is empty.</p>
-        <a href="/papers" class="btn btn-primary mt-3">Browse Papers</a>
+        <p class="text-muted small">Drag files into the box above or browse paper recommendations to save papers for later.</p>
+        <a href="/papers" class="btn btn-primary mt-2">Browse Papers</a>
     </div>
     {% endif %}
 
@@ -27,6 +44,11 @@
                         <a href="/papers/{{ paper.arxiv_id }}" class="text-light text-decoration-none fw-semibold">{{ paper.title | safe }}</a>
                     </h5>
                     <div class="d-flex gap-2">
+                        {% if paper.pdf_url %}
+                        <a href="{{ paper.pdf_url }}" target="_blank" class="btn btn-sm btn-outline-primary px-3" title="Read uploaded PDF">
+                            <i class="bi bi-file-pdf me-1"></i> Read PDF
+                        </a>
+                        {% endif %}
                         {% if filter_type == 'unread' %}
                         <button class="btn btn-sm btn-success px-3" onclick="markAsRead('{{ paper.arxiv_id }}', this)" title="Mark as read">
                             <i class="bi bi-check-lg me-1"></i> Done
@@ -63,6 +85,70 @@
 
 {% block scripts %}
 <script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const uploadStatus = document.getElementById('upload-status');
+
+if (dropZone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#38bdf8';
+            dropZone.style.backgroundColor = 'rgba(15, 23, 42, 0.9)';
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+            dropZone.style.backgroundColor = '';
+        }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length) {
+            handleFiles(dt.files);
+        }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        handleFiles(e.target.files);
+    });
+}
+
+async function handleFiles(files) {
+    if (!files || !files.length) return;
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+    }
+    
+    uploadStatus.classList.remove('d-none');
+    uploadStatus.className = 'mt-3 small text-info fw-medium';
+    uploadStatus.textContent = `Uploading and processing ${files.length} file(s)...`;
+    
+    try {
+        const resp = await fetch('/api/papers/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            uploadStatus.className = 'mt-3 small text-success fw-medium';
+            uploadStatus.textContent = `Saved ${data.saved_count} paper(s) for later! Reloading list...`;
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            uploadStatus.className = 'mt-3 small text-danger fw-medium';
+            uploadStatus.textContent = data.error || 'Upload failed.';
+        }
+    } catch (err) {
+        uploadStatus.className = 'mt-3 small text-danger fw-medium';
+        uploadStatus.textContent = 'Upload failed: ' + err.message;
+    }
+}
+
 async function markAsRead(arxivId, btn) {
     try {
         const resp = await fetch(`/api/reading-list/${encodeURIComponent(arxivId)}/read`, {

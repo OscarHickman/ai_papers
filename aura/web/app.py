@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 import secrets
 import uuid
 
@@ -160,8 +161,22 @@ def create_app(config_path: str | None = None) -> Flask:
 
     app = Flask(__name__)
 
-    # Secret key required by Flask-Login session cookies
-    app.secret_key = os.environ.get("AURA_SECRET_KEY") or secrets.token_hex(32)
+    secret_key = os.environ.get("AURA_SECRET_KEY")
+    if not secret_key and os.path.exists("data/.secret_key"):
+        try:
+            with open("data/.secret_key") as f:
+                secret_key = f.read().strip()
+        except Exception:
+            pass
+    if not secret_key:
+        secret_key = secrets.token_hex(32)
+        try:
+            os.makedirs("data", exist_ok=True)
+            with open("data/.secret_key", "w") as f:
+                f.write(secret_key)
+        except Exception:
+            pass
+    app.secret_key = secret_key
 
     # Disable CSRF protection dynamically during testing
     @app.before_request
@@ -1025,6 +1040,149 @@ def _register_routes(app: Flask) -> None:
             return jsonify(result), 404
         return jsonify(result)
 
+    @app.route("/uploads/pdf/<path:filename>")
+    @login_required
+    def serve_uploaded_pdf(filename):
+        """Serve user-uploaded PDF file for viewing directly in browser."""
+        from flask import send_from_directory
+        safe_name = os.path.basename(filename)
+        upload_dir = Path(app.config.get("AI_PAPERS", {}).get("data_dir", "data")) / "uploads"
+        filepath = upload_dir / safe_name
+        if not filepath.exists():
+            return "PDF file not found", 404
+        return send_from_directory(upload_dir, safe_name, mimetype="application/pdf")
+
+    @app.route("/api/papers/upload", methods=["POST"])
+    @login_required
+    @csrf.exempt
+    def upload_drag_drop_papers():
+        """Upload BibTeX, PDF, or text files to scan key details and save papers for later."""
+        if not engine:
+            return jsonify({"error": "Engine not initialized"}), 500
+
+        uid = _get_current_user_id()
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "No files uploaded"}), 400
+
+        upload_dir = Path(app.config.get("AI_PAPERS", {}).get("data_dir", "data")) / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_papers = []
+        import re
+        from datetime import datetime
+        from ..pdf_scanner import scan_pdf_metadata
+
+        for f in files:
+            filename = f.filename or "paper.pdf"
+            content_bytes = f.read()
+
+            # 1. Handle BibTeX files (.bib, or text containing @)
+            if filename.endswith(".bib") or b"@" in content_bytes:
+                try:
+                    text_content = content_bytes.decode("utf-8", errors="ignore")
+                    arxiv_ids = re.findall(
+                        r"(?:arXiv:\s*|abs/|arxiv_id\s*=\s*[\"\{]?)([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)",
+                        text_content,
+                        re.IGNORECASE,
+                    )
+                    blocks = text_content.split("@")
+                    for block in blocks:
+                        if not block.strip():
+                            continue
+                        eprint_match = re.search(
+                            r"eprint\s*=\s*[\"\{]?([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)",
+                            block,
+                            re.IGNORECASE,
+                        )
+                        if eprint_match:
+                            arxiv_ids.append(eprint_match.group(1))
+
+                    arxiv_ids = list(dict.fromkeys(arxiv_ids))
+                    for aid in arxiv_ids:
+                        paper = engine.fetch_and_add_paper(aid)
+                        if paper:
+                            engine.db.rate_paper(aid, 1, user_id=uid)
+                            engine.db.add_to_reading_list(aid, user_id=uid)
+                            saved_papers.append({"arxiv_id": aid, "title": paper.get("title", aid)})
+                except Exception as e:
+                    logger.error(f"Error parsing BibTeX upload {filename}: {e}")
+
+            # 2. Handle PDF files (.pdf)
+            elif filename.lower().endswith(".pdf"):
+                try:
+                    # Scan PDF key details
+                    scanned = scan_pdf_metadata(content_bytes, filename)
+                    clean_filename = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", filename)
+                    pdf_file_path = upload_dir / clean_filename
+                    with open(pdf_file_path, "wb") as out_f:
+                        out_f.write(content_bytes)
+
+                    pdf_url = f"/uploads/pdf/{clean_filename}"
+
+                    if scanned.get("arxiv_id"):
+                        aid = scanned["arxiv_id"]
+                        paper = engine.fetch_and_add_paper(aid)
+                        if paper:
+                            engine.db.conn.execute("UPDATE papers SET pdf_url = ? WHERE arxiv_id = ?", (pdf_url, aid))
+                            engine.db.conn.commit()
+                            engine.db.rate_paper(aid, 1, user_id=uid)
+                            engine.db.add_to_reading_list(aid, user_id=uid)
+                            saved_papers.append({
+                                "arxiv_id": aid,
+                                "title": paper.get("title", aid),
+                                "pdf_url": pdf_url,
+                                "authors": paper.get("authors", []),
+                            })
+                    else:
+                        clean_title = scanned["title"]
+                        custom_id = f"custom/{re.sub(r'[^a-zA-Z0-9]', '_', clean_title.lower())[:50]}"
+                        paper_data = {
+                            "arxiv_id": custom_id,
+                            "title": clean_title,
+                            "abstract": scanned["abstract"],
+                            "authors": scanned["authors"],
+                            "categories": ["pdf-upload"],
+                            "published": datetime.utcnow().strftime("%Y-%m-%d"),
+                            "url": pdf_url,
+                            "pdf_url": pdf_url,
+                            "source": "pdf_upload",
+                        }
+                        from ..embedder import embed_papers_batch
+                        emb = embed_papers_batch([paper_data], model_name=engine.embedding_model)
+                        engine.db.add_papers_batch([paper_data], emb, [scanned["abstract"]])
+                        engine.db.rate_paper(custom_id, 1, user_id=uid)
+                        engine.db.add_to_reading_list(custom_id, user_id=uid)
+                        saved_papers.append({
+                            "arxiv_id": custom_id,
+                            "title": clean_title,
+                            "pdf_url": pdf_url,
+                            "authors": scanned["authors"],
+                        })
+                except Exception as e:
+                    logger.error(f"Error scanning PDF upload {filename}: {e}")
+
+            # 3. Handle Plain Text files (.txt)
+            else:
+                try:
+                    text_content = content_bytes.decode("utf-8", errors="ignore")
+                    found_ids = re.findall(r"\b([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)\b", text_content)
+                    found_ids = list(dict.fromkeys(found_ids))
+                    for aid in found_ids:
+                        paper = engine.fetch_and_add_paper(aid)
+                        if paper:
+                            engine.db.rate_paper(aid, 1, user_id=uid)
+                            engine.db.add_to_reading_list(aid, user_id=uid)
+                            saved_papers.append({"arxiv_id": aid, "title": paper.get("title", aid)})
+                except Exception as e:
+                    logger.error(f"Error parsing text upload {filename}: {e}")
+
+        return jsonify({
+            "status": "ok",
+            "saved_count": len(saved_papers),
+            "papers": saved_papers,
+        })
+
     @app.route("/api/retrain", methods=["POST"])
     @login_required
     def retrain():
@@ -1454,13 +1612,84 @@ def _register_routes(app: Flask) -> None:
         if request.method == "POST":
             freq = request.form.get("digest_frequency")
             if freq in ["daily", "weekly", "off"]:
-                success = engine.db.update_user(uid, digest_frequency=freq) if engine else False
-                if success:
-                    flash("Settings updated successfully.", "success")
-                else:
-                    flash("Failed to update settings.", "danger")
-            else:
-                flash("Invalid digest frequency option.", "danger")
+                if engine:
+                    engine.db.update_user(uid, digest_frequency=freq)
+
+            config = app.config.get("AI_PAPERS", {})
+
+            # Categories
+            cat_str = request.form.get("categories")
+            if cat_str is not None:
+                new_cats = [c.strip() for c in cat_str.split(",") if c.strip()]
+                if new_cats:
+                    config["categories"] = new_cats
+
+            # Scheduler settings
+            if "scheduler_submitted" in request.form:
+                sched = config.setdefault("scheduler", {})
+                sched["enabled"] = request.form.get("scheduler_enabled") in ["on", "true", "1"]
+                try:
+                    sched["fetch_hour"] = max(0, min(23, int(request.form.get("fetch_hour", 6))))
+                    sched["fetch_minute"] = max(0, min(59, int(request.form.get("fetch_minute", 0))))
+                except ValueError:
+                    pass
+
+                fetch_conf = config.setdefault("fetch", {})
+                try:
+                    fetch_conf["max_results"] = max(1, int(request.form.get("max_results", 200)))
+                    fetch_conf["days_back"] = max(1, int(request.form.get("days_back", 2)))
+                except ValueError:
+                    pass
+
+                summs_conf = config.setdefault("summaries", {})
+                summs_conf["generate_on_fetch"] = request.form.get("generate_on_fetch") in ["on", "true", "1"]
+
+            # LLM Settings
+            if "llm_submitted" in request.form:
+                llm = config.setdefault("llm", {})
+                provider = request.form.get("llm_provider")
+                if provider in ["groq", "google", "openai", "anthropic"]:
+                    current_order = llm.get("providers_order", ["groq"])
+                    llm["providers_order"] = [provider] + [p for p in current_order if p != provider]
+
+                providers = llm.setdefault("providers", {})
+                for prov in ["groq", "google", "openai", "anthropic"]:
+                    prov_key = request.form.get(f"{prov}_api_key", "").strip()
+                    if prov_key:
+                        providers.setdefault(prov, {})["api_key"] = prov_key
+
+            # Email Settings
+            if "email_submitted" in request.form:
+                email_conf = config.setdefault("email", {})
+                email_conf["smtp_host"] = request.form.get("smtp_host", "").strip()
+                try:
+                    email_conf["smtp_port"] = int(request.form.get("smtp_port", 587))
+                except ValueError:
+                    pass
+                email_conf["smtp_username"] = request.form.get("smtp_username", "").strip()
+                if request.form.get("smtp_password"):
+                    email_conf["smtp_password"] = request.form.get("smtp_password", "").strip()
+                email_conf["from_email"] = request.form.get("from_email", "").strip()
+                email_conf["to_email"] = request.form.get("to_email", "").strip()
+                email_conf["use_tls"] = request.form.get("use_tls") in ["on", "true", "1"]
+                email_conf["use_ssl"] = request.form.get("use_ssl") in ["on", "true", "1"]
+
+            # Save config to file and update active application context
+            from ..config import save_config_file
+            save_config_file(config)
+            app.config["AI_PAPERS"] = config
+            if engine:
+                engine.categories = config.get("categories", ["astro-ph.CO", "astro-ph.GA"])
+
+            # Clear LLM provider caches
+            from ..llm import _provider_config_cache
+            _provider_config_cache.clear()
+
+            # Reschedule daily server job
+            from ..scheduler import update_scheduler
+            update_scheduler(app, config)
+
+            flash("Settings and daily server job configuration updated successfully.", "success")
             return redirect(url_for("settings"))
 
         stats_data = engine.get_stats(user_id=uid)
@@ -1468,6 +1697,34 @@ def _register_routes(app: Flask) -> None:
         tokens = engine.db.get_user_tokens(uid) if engine else []
         user_record = engine.db.get_user_by_id(uid) if engine else None
         return render_template("settings.html", stats=stats_data, config=config, tokens=tokens, user=user_record)
+
+    @app.route("/api/daily-job/run", methods=["POST"])
+    @login_required
+    @csrf.exempt
+    def run_daily_job_now():
+        """Manually trigger the daily server job back-to-front."""
+        if not engine:
+            return jsonify({"error": "Engine not initialized"}), 500
+
+        config = app.config.get("AI_PAPERS", {})
+        fetch_config = config.get("fetch", {})
+        summaries_config = config.get("summaries", {})
+        gen_summaries = summaries_config.get("generate_on_fetch", False)
+
+        max_results = fetch_config.get("max_results", 200)
+        days_back = fetch_config.get("days_back", 2)
+
+        count = engine.fetch_new_papers(
+            max_results=max_results,
+            days_back=days_back,
+            generate_summaries=gen_summaries,
+        )
+
+        return jsonify({
+            "status": "ok",
+            "message": f"Daily job executed successfully. Fetched {count} new papers.",
+            "new_papers": count,
+        })
 
     @app.route("/settings/authors", methods=["GET", "POST"])
     @login_required

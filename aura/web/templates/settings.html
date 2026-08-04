@@ -1,129 +1,166 @@
 {% extends "base.html" %}
-{% block title %}Settings - AI Papers{% endblock %}
+{% block title %}Settings & Daily Server Job - AURA{% endblock %}
 
 {% block content %}
-<h1 class="mb-4"><i class="bi bi-gear"></i> Settings & Model</h1>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0"><i class="bi bi-gear-fill me-2"></i> Settings &amp; Server Configuration</h1>
+    <button class="btn btn-success" onclick="runDailyJobNow()">
+        <i class="bi bi-play-circle-fill me-1"></i> Run Daily Server Job Now
+    </button>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible fade show py-2" role="alert">
+      {{ message }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+  {% endfor %}
+{% endwith %}
 
 <div class="row g-4">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="bi bi-cpu"></i> Neural Network Model</h5>
-            </div>
-            <div class="card-body">
-                <p class="text-muted">
-                    Your preference model is a neural network that learns from your thumbs up/down ratings.
-                    The model weights file <strong>is</strong> your preference config.
-                </p>
-                <table class="table table-sm">
-                    <tr><td>Model File</td><td><code>{{ stats.model.model_path }}</code></td></tr>
-                    <tr><td>Total Parameters</td><td>{{ "{:,}".format(stats.model.parameters) }}</td></tr>
-                    <tr><td>Embedding Dimension</td><td>{{ stats.model.embedding_dim }}</td></tr>
-                    <tr><td>Learning Rate</td><td>{{ stats.model.learning_rate }}</td></tr>
-                    <tr><td>Total Training Samples</td><td>{{ stats.model.total_trained }}</td></tr>
-                </table>
-
-                {% if stats.model.recent_losses %}
-                <h6>Recent Training Losses</h6>
-                <div class="loss-history">
-                    {% for loss in stats.model.recent_losses %}
-                    <span class="badge bg-secondary">{{ "%.4f" | format(loss) }}</span>
-                    {% endfor %}
-                </div>
+    <!-- Daily Server Job & Fetch Settings -->
+    <div class="col-lg-6">
+        <div class="card border-primary h-100">
+            <div class="card-header bg-dark border-primary d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 text-primary"><i class="bi bi-clock-history me-2"></i> Daily Server Job &amp; Fetching</h5>
+                {% if config.scheduler and config.scheduler.enabled %}
+                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i> Active</span>
+                {% else %}
+                <span class="badge bg-secondary"><i class="bi bi-pause-circle me-1"></i> Disabled</span>
                 {% endif %}
-
-                <hr>
-                <h6>Model Actions</h6>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-warning" onclick="retrainModel()"
-                            {% if stats.database.total_rated < 5 %}disabled{% endif %}>
-                        <i class="bi bi-arrow-repeat"></i> Full Retrain
-                    </button>
-                    <button class="btn btn-outline-danger" onclick="resetModel()">
-                        <i class="bi bi-trash"></i> Reset Model
-                    </button>
-                </div>
-                {% if stats.database.total_rated < 5 %}
-                <small class="text-warning mt-2 d-block">
-                    Rate at least 5 papers before retraining (currently {{ stats.database.total_rated }}).
-                </small>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="bi bi-database"></i> Database</h5>
-            </div>
-            <div class="card-body">
-                <table class="table table-sm">
-                    <tr><td>Total Papers</td><td>{{ stats.database.total_papers }}</td></tr>
-                    <tr><td>With Embeddings</td><td>{{ stats.database.with_embeddings }}</td></tr>
-                    <tr><td>Total Rated</td><td>{{ stats.database.total_rated }}</td></tr>
-                    <tr>
-                        <td>Thumbs Up</td>
-                        <td><span class="text-success">{{ stats.database.thumbs_up }}</span></td>
-                    </tr>
-                    <tr>
-                        <td>Thumbs Down</td>
-                        <td><span class="text-danger">{{ stats.database.thumbs_down }}</span></td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-
-        <div class="card mt-4">
-            <div class="card-header">
-                <h5><i class="bi bi-sliders"></i> Configuration</h5>
-            </div>
-            <div class="card-body">
-                <table class="table table-sm">
-                    <tr><td>Data Directory</td><td><code>{{ stats.data_dir }}</code></td></tr>
-                    <tr><td>Categories</td><td>
-                        {% for cat in stats.categories %}
-                        <span class="badge bg-primary">{{ cat }}</span>
-                        {% endfor %}
-                    </td></tr>
-                </table>
-                <p class="text-muted">
-                    <small>Edit <code>config.yaml</code> to change categories and other settings.</small>
-                </p>
-            </div>
-        </div>
-
-        <div class="card mt-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-person-badge"></i> Tracked Authors</h5>
-                <a href="/settings/authors" class="btn btn-outline-primary btn-sm"><i class="bi bi-pencil-square"></i> Manage</a>
-            </div>
-            <div class="card-body">
-                <p class="text-muted small mb-0">
-                    Follow specific authors or track members of your research group to boost their papers and flag them in your feed.
-                </p>
-            </div>
-        </div>
-
-        <div class="card mt-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-calendar-event"></i> Conference &amp; Deadline Calendar</h5>
-                <a href="/settings/calendar" class="btn btn-outline-primary btn-sm"><i class="bi bi-pencil-square"></i> Manage</a>
-            </div>
-            <div class="card-body">
-                <p class="text-muted small mb-0">
-                    Track upcoming conference dates and proposal deadlines. Events within the next 30 days appear in your dashboard sidebar.
-                </p>
-            </div>
-        </div>
-
-        <div class="card mt-4">
-            <div class="card-header">
-                <h5><i class="bi bi-envelope"></i> Email Digest Settings</h5>
             </div>
             <div class="card-body">
                 <form method="post" action="/settings">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="scheduler_submitted" value="1">
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="scheduler_enabled" name="scheduler_enabled"
+                               {% if config.scheduler and config.scheduler.enabled %}checked{% endif %}>
+                        <label class="form-check-label fw-bold" for="scheduler_enabled">
+                            Enable Automatic Daily Fetch Job
+                        </label>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label for="fetch_hour" class="form-label small">Execution Hour (UTC 0-23)</label>
+                            <input type="number" class="form-control form-control-sm" id="fetch_hour" name="fetch_hour"
+                                   min="0" max="23" value="{{ config.scheduler.fetch_hour if config.scheduler else 6 }}">
+                        </div>
+                        <div class="col-6">
+                            <label for="fetch_minute" class="form-label small">Execution Minute (0-59)</label>
+                            <input type="number" class="form-control form-control-sm" id="fetch_minute" name="fetch_minute"
+                                   min="0" max="59" value="{{ config.scheduler.fetch_minute if config.scheduler else 0 }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="categories" class="form-label small">Monitored arXiv Categories</label>
+                        <input type="text" class="form-control form-control-sm" id="categories" name="categories"
+                               value="{{ config.categories | join(', ') if config.categories else 'astro-ph.CO, astro-ph.GA' }}"
+                               placeholder="e.g. astro-ph.CO, astro-ph.GA, cs.AI, stat.ML">
+                        <div class="form-text extra-small">Comma-separated arXiv categories.</div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label for="max_results" class="form-label small">Max Papers Per Fetch</label>
+                            <input type="number" class="form-control form-control-sm" id="max_results" name="max_results"
+                                   value="{{ config.fetch.max_results if config.fetch else 200 }}">
+                        </div>
+                        <div class="col-6">
+                            <label for="days_back" class="form-label small">Lookback Window (Days)</label>
+                            <input type="number" class="form-control form-control-sm" id="days_back" name="days_back"
+                                   value="{{ config.fetch.days_back if config.fetch else 2 }}">
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="generate_on_fetch" name="generate_on_fetch"
+                               {% if config.summaries and config.summaries.generate_on_fetch %}checked{% endif %}>
+                        <label class="form-check-label small" for="generate_on_fetch">
+                            Auto-generate AI Summaries during daily fetch
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-save me-1"></i> Save Daily Job Settings
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI & LLM Provider Configuration -->
+    <div class="col-lg-6">
+        <div class="card border-info h-100">
+            <div class="card-header bg-dark border-info">
+                <h5 class="mb-0 text-info"><i class="bi bi-robot me-2"></i> AI &amp; LLM Summary Settings</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/settings">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="llm_submitted" value="1">
+
+                    <div class="mb-3">
+                        <label for="llm_provider" class="form-label small">Active LLM Provider</label>
+                        <select class="form-select form-select-sm" id="llm_provider" name="llm_provider">
+                            {% set current_prov = config.llm.providers_order[0] if (config.llm and config.llm.providers_order) else 'groq' %}
+                            <option value="groq" {% if current_prov == 'groq' %}selected{% endif %}>Groq (Fast &amp; Free Tier)</option>
+                            <option value="google" {% if current_prov == 'google' %}selected{% endif %}>Google Gemini</option>
+                            <option value="openai" {% if current_prov == 'openai' %}selected{% endif %}>OpenAI</option>
+                            <option value="anthropic" {% if current_prov == 'anthropic' %}selected{% endif %}>Anthropic Claude</option>
+                        </select>
+                    </div>
+
+                    {% set providers = config.llm.providers if (config.llm and config.llm.providers) else {} %}
+                    <div class="mb-2">
+                        <label for="groq_api_key" class="form-label extra-small text-muted">Groq API Key</label>
+                        <input type="password" class="form-control form-control-sm" id="groq_api_key" name="groq_api_key"
+                               placeholder="gsk_..." value="{{ '********' if providers.groq and providers.groq.api_key else '' }}">
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="google_api_key" class="form-label extra-small text-muted">Google Gemini API Key</label>
+                        <input type="password" class="form-control form-control-sm" id="google_api_key" name="google_api_key"
+                               placeholder="AIzaSy..." value="{{ '********' if providers.google and providers.google.api_key else '' }}">
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="openai_api_key" class="form-label extra-small text-muted">OpenAI API Key</label>
+                        <input type="password" class="form-control form-control-sm" id="openai_api_key" name="openai_api_key"
+                               placeholder="sk-..." value="{{ '********' if providers.openai and providers.openai.api_key else '' }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="anthropic_api_key" class="form-label extra-small text-muted">Anthropic API Key</label>
+                        <input type="password" class="form-control form-control-sm" id="anthropic_api_key" name="anthropic_api_key"
+                               placeholder="sk-ant-..." value="{{ '********' if providers.anthropic and providers.anthropic.api_key else '' }}">
+                    </div>
+
+                    <button type="submit" class="btn btn-info btn-sm w-100 text-white">
+                        <i class="bi bi-save me-1"></i> Save LLM Configuration
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-1">
+    <!-- Email Digest & SMTP Settings -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-dark">
+                <h5 class="mb-0"><i class="bi bi-envelope-paper me-2"></i> Email Digest &amp; SMTP Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/settings">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="email_submitted" value="1">
+
                     <div class="mb-3">
                         <label for="digest_frequency" class="form-label small">Digest Frequency</label>
                         <select class="form-select form-select-sm" id="digest_frequency" name="digest_frequency">
@@ -132,37 +169,150 @@
                             <option value="off" {% if user and user.digest_frequency == 'off' %}selected{% endif %}>Off (Disabled)</option>
                         </select>
                     </div>
-                    <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
+
+                    {% set email_conf = config.email if config.email else {} %}
+                    <div class="row g-2 mb-2">
+                        <div class="col-8">
+                            <label for="smtp_host" class="form-label extra-small text-muted">SMTP Server Host</label>
+                            <input type="text" class="form-control form-control-sm" id="smtp_host" name="smtp_host"
+                                   placeholder="smtp.gmail.com" value="{{ email_conf.smtp_host or '' }}">
+                        </div>
+                        <div class="col-4">
+                            <label for="smtp_port" class="form-label extra-small text-muted">Port</label>
+                            <input type="number" class="form-control form-control-sm" id="smtp_port" name="smtp_port"
+                                   placeholder="587" value="{{ email_conf.smtp_port or 587 }}">
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label for="smtp_username" class="form-label extra-small text-muted">SMTP Username</label>
+                            <input type="text" class="form-control form-control-sm" id="smtp_username" name="smtp_username"
+                                   value="{{ email_conf.smtp_username or '' }}">
+                        </div>
+                        <div class="col-6">
+                            <label for="smtp_password" class="form-label extra-small text-muted">SMTP Password</label>
+                            <input type="password" class="form-control form-control-sm" id="smtp_password" name="smtp_password"
+                                   placeholder="{{ '********' if email_conf.smtp_password else '' }}">
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label for="from_email" class="form-label extra-small text-muted">Sender (From Email)</label>
+                            <input type="email" class="form-control form-control-sm" id="from_email" name="from_email"
+                                   value="{{ email_conf.from_email or '' }}">
+                        </div>
+                        <div class="col-6">
+                            <label for="to_email" class="form-label extra-small text-muted">Recipient (To Email)</label>
+                            <input type="email" class="form-control form-control-sm" id="to_email" name="to_email"
+                                   value="{{ email_conf.to_email or (user.email if user else '') }}">
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-3 mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="use_tls" name="use_tls"
+                                   {% if email_conf.use_tls != false %}checked{% endif %}>
+                            <label class="form-check-label extra-small" for="use_tls">Use TLS</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="use_ssl" name="use_ssl"
+                                   {% if email_conf.use_ssl %}checked{% endif %}>
+                            <label class="form-check-label extra-small" for="use_ssl">Use SSL</label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-secondary btn-sm w-100">
+                        <i class="bi bi-save me-1"></i> Save Email &amp; SMTP Settings
+                    </button>
                 </form>
+
                 {% if user and user.unsubscribe_token %}
                 <div class="mt-3 pt-3 border-top">
-                    <p class="text-muted mb-1" style="font-size: 0.75rem;">Your unique unsubscribe link:</p>
-                    <a href="/unsubscribe/{{ user.unsubscribe_token }}" class="text-danger" style="font-size: 0.75rem;">
+                    <p class="text-muted mb-1 extra-small">Your unique unsubscribe link:</p>
+                    <a href="/unsubscribe/{{ user.unsubscribe_token }}" class="text-danger extra-small">
                         /unsubscribe/{{ user.unsubscribe_token[:12] }}...
                     </a>
                 </div>
                 {% endif %}
             </div>
         </div>
+    </div>
 
-        <div class="card mt-4">
-            <div class="card-header">
-                <h5><i class="bi bi-rss"></i> RSS Feeds</h5>
+    <!-- Neural Network Preference Model -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-dark">
+                <h5 class="mb-0"><i class="bi bi-cpu me-2"></i> Neural Network Preference Model</h5>
             </div>
             <div class="card-body">
-                <ul class="list-group list-group-flush mb-3">
-                    {% for feed in config.rss_feeds %}
-                    <li class="list-group-item bg-transparent text-light border-secondary px-0 small d-flex justify-content-between align-items-center">
-                        <span class="text-truncate" style="max-width: 80%;">{{ feed }}</span>
-                        <i class="bi bi-check-circle-fill text-success"></i>
-                    </li>
+                <p class="text-muted small">
+                    Your preference model is a neural network that learns from your thumbs up/down ratings.
+                    The model weights file <strong>is</strong> your preference config.
+                </p>
+                <table class="table table-sm extra-small">
+                    <tr><td>Model File</td><td><code>{{ stats.model.model_path }}</code></td></tr>
+                    <tr><td>Total Parameters</td><td>{{ "{:,}".format(stats.model.parameters) }}</td></tr>
+                    <tr><td>Embedding Dimension</td><td>{{ stats.model.embedding_dim }}</td></tr>
+                    <tr><td>Learning Rate</td><td>{{ stats.model.learning_rate }}</td></tr>
+                    <tr><td>Total Training Samples</td><td>{{ stats.model.total_trained }}</td></tr>
+                </table>
+
+                {% if stats.model.recent_losses %}
+                <h6 class="extra-small text-muted">Recent Training Losses</h6>
+                <div class="loss-history mb-3">
+                    {% for loss in stats.model.recent_losses %}
+                    <span class="badge bg-secondary me-1">{{ "%.4f" | format(loss) }}</span>
                     {% endfor %}
-                </ul>
-                {% if not config.rss_feeds %}
-                <p class="text-muted small">No custom RSS feeds configured.</p>
+                </div>
                 {% endif %}
-                <p class="text-muted extra-small">
-                    <small>Add RSS feed URLs to the <code>rss_feeds</code> list in <code>config.yaml</code> to fetch from specific journals.</small>
+
+                <hr class="my-2">
+                <div class="d-flex gap-2">
+                    <button class="btn btn-warning btn-sm" onclick="retrainModel()"
+                            {% if stats.database.total_rated < 5 %}disabled{% endif %}>
+                        <i class="bi bi-arrow-repeat"></i> Full Retrain
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="resetModel()">
+                        <i class="bi bi-trash"></i> Reset Model
+                    </button>
+                </div>
+                {% if stats.database.total_rated < 5 %}
+                <small class="text-warning mt-2 d-block extra-small">
+                    Rate at least 5 papers before retraining (currently {{ stats.database.total_rated }}).
+                </small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-1">
+    <!-- Tracked Authors & Calendar Links -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i> Tracked Authors</h5>
+                <a href="/settings/authors" class="btn btn-outline-primary btn-sm"><i class="bi bi-pencil-square me-1"></i> Manage</a>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-0">
+                    Follow specific authors or track members of your research group to boost their papers and flag them in your feed.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-calendar-event me-2"></i> Conference &amp; Deadline Calendar</h5>
+                <a href="/settings/calendar" class="btn btn-outline-primary btn-sm"><i class="bi bi-pencil-square me-1"></i> Manage</a>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-0">
+                    Track upcoming conference dates and proposal deadlines. Events within the next 30 days appear in your dashboard sidebar.
                 </p>
             </div>
         </div>
@@ -170,52 +320,34 @@
 </div>
 
 <div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="bi bi-info-circle"></i> How It Works</h5>
-            </div>
-            <div class="card-body">
-                <ol>
-                    <li><strong>Fetch:</strong> Papers are downloaded from arXiv for your configured astrophysics categories.</li>
-                    <li><strong>Embed:</strong> Each paper's title + abstract is converted to a 384-dimensional vector using a sentence-transformer model.</li>
-                    <li><strong>Score:</strong> Your neural network preference model scores each paper (0-1) based on learned preferences.</li>
-                    <li><strong>Rate:</strong> You thumbs-up or thumbs-down papers. Each rating immediately updates the model (online learning).</li>
-                    <li><strong>Improve:</strong> The more you rate, the better the recommendations get. Use "Full Retrain" periodically for best results.</li>
-                </ol>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row mt-4">
+    <!-- API Tokens -->
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-key"></i> API Tokens</h5>
+                <h5 class="mb-0"><i class="bi bi-key me-2"></i> API Tokens</h5>
                 <button class="btn btn-primary btn-sm" onclick="createToken()">
-                    <i class="bi bi-plus-circle me-1"></i>New Token
+                    <i class="bi bi-plus-circle me-1"></i> New Token
                 </button>
             </div>
             <div class="card-body">
                 <p class="text-muted small">Use API tokens to authenticate requests from scripts or external tools. Tokens are shown only once on creation. <a href="/api/docs" class="text-info text-decoration-none ms-2"><i class="bi bi-file-earmark-code"></i> View interactive API Documentation</a></p>
                 {% if tokens %}
-                <table class="table table-sm">
-                    <thead><tr><th>Token</th><th>Created</th><th></th></tr></thead>
+                <table class="table table-sm extra-small">
+                    <thead><tr><th>Token</th><th>Created</th><th>Actions</th></tr></thead>
                     <tbody>
                         {% for t in tokens %}
                         <tr>
                             <td><code class="text-muted">{{ t.token[:8] }}&hellip;</code></td>
-                            <td class="text-muted small">{{ t.created_at[:10] }}</td>
+                            <td class="text-muted">{{ t.created_at[:10] }}</td>
                             <td><button class="btn btn-link text-danger btn-sm p-0" onclick="revokeToken({{ t.id }})">Revoke</button></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-muted small">No tokens yet.</p>
+                <p class="text-muted small mb-0">No API tokens created yet.</p>
                 {% endif %}
-                <div id="new-token-display" class="alert alert-success d-none mt-2">
+                <div id="new-token-display" class="alert alert-success d-none mt-3 mb-0">
                     <strong>New token (copy now &mdash; won't be shown again):</strong><br>
                     <code id="new-token-value"></code>
                 </div>
@@ -237,6 +369,29 @@
 
 {% block scripts %}
 <script>
+function showToast(title, message) {
+    document.getElementById('toastTitle').textContent = title;
+    document.getElementById('toastBody').textContent = message;
+    const toast = new bootstrap.Toast(document.getElementById('actionToast'));
+    toast.show();
+}
+
+async function runDailyJobNow() {
+    showToast('Executing Daily Job', 'Triggering paper fetch and summary pipeline...');
+    try {
+        const resp = await fetch('/api/daily-job/run', { method: 'POST', headers: {'Content-Type': 'application/json'} });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            showToast('Daily Job Complete', data.message || 'Daily job executed successfully.');
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showToast('Error', data.error || 'Daily job execution failed.');
+        }
+    } catch (e) {
+        showToast('Error', 'Failed to run daily job: ' + e.message);
+    }
+}
+
 function pollTask(taskId, onProgress, onComplete, onError) {
     const interval = setInterval(async () => {
         try {
@@ -261,13 +416,6 @@ function pollTask(taskId, onProgress, onComplete, onError) {
         }
     }, 1000);
     return interval;
-}
-
-function showToast(title, message) {
-    document.getElementById('toastTitle').textContent = title;
-    document.getElementById('toastBody').textContent = message;
-    const toast = new bootstrap.Toast(document.getElementById('actionToast'));
-    toast.show();
 }
 
 async function retrainModel() {

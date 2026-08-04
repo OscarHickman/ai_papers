@@ -2,6 +2,7 @@ name: Build and Deploy
 
 on:
   push:
+    branches: [ main, master ]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -106,7 +107,10 @@ jobs:
             REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
             TAG="${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}"
             echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            mkdir -p ~/docker/aura
+            mkdir -p ~/docker/aura/data ~/docker/aura/user_credentials ~/docker/aura/qdrant_storage ~/docker/aura/redis_data
+            if [ ! -f ~/docker/aura/config.yaml ]; then
+              touch ~/docker/aura/config.yaml
+            fi
             { echo "IMAGE=ghcr.io/$REPO"; echo "TAG=$TAG"; } > ~/docker/aura/.env
             cd ~/docker/aura
             docker compose pull

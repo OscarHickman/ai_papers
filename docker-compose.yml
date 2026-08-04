@@ -19,6 +19,7 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
     volumes:
+      - ./config.yaml:/app/config.yaml
       - ./data:/app/data
       - ./user_credentials:/app/user_credentials
     depends_on:
@@ -32,6 +33,9 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - ./redis_data:/data
 
   qdrant:
     image: qdrant/qdrant:latest
