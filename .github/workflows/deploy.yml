@@ -101,7 +101,11 @@ jobs:
             fi
             sed -i '/^TAG=/d' .env 2>/dev/null || true
             echo \"TAG=$RELEASE_TAG\" >> .env
+            docker image prune -af --filter "until=24h" || true
+            docker builder prune -f || true
             docker compose pull
             docker compose up -d --remove-orphans
+            docker image prune -f || true
           "
+
 
