@@ -66,17 +66,36 @@ jobs:
   deploy:
     needs: build-and-push
     if: github.ref_type == 'tag'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
       - name: Deploy
-        run: |
-          set -e
-          TAG="${{ github.ref_name }}"
-          mkdir -p ~/docker/aura/data ~/docker/aura/user_credentials ~/docker/aura/qdrant_storage ~/docker/aura/redis_data
-          if [ ! -f ~/docker/aura/config.yaml ]; then
-            touch ~/docker/aura/config.yaml
-          fi
-          printf 'IMAGE=ghcr.io/oscarhickman/aura\nTAG=%s\n' "$TAG" > ~/docker/aura/.env
-          cd ~/docker/aura
-          docker compose pull
-          docker compose up -d
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 100.88.127.35
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: RELEASE_TAG
+          script_stop: true
+          script: |
+            set -euo pipefail
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u oscarhickman --password-stdin
+            TAG=$RELEASE_TAG
+            mkdir -p ~/docker/aura/data ~/docker/aura/user_credentials ~/docker/aura/qdrant_storage ~/docker/aura/redis_data
+            if [ ! -f ~/docker/aura/config.yaml ]; then
+              touch ~/docker/aura/config.yaml
+            fi
+            printf 'IMAGE=ghcr.io/oscarhickman/aura
+TAG=%s
+' "$TAG" > ~/docker/aura/.env
+            cd ~/docker/aura
+            docker compose pull
+            docker compose up -d
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
