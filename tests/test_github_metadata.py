@@ -129,8 +129,9 @@ class TestGitHubMetadata(unittest.TestCase):
         self.assertEqual(meta_updated["stars"], 15)
         self.assertEqual(meta_updated["language"], "Jupyter Notebook")
 
+    @patch("aura.recommender.get_embedding_dim", return_value=384)
     @patch("aura.github.fetch_github_metadata")
-    def test_engine_ingest_and_refresh(self, mock_fetch_github):
+    def test_engine_ingest_and_refresh(self, mock_fetch_github, _mock_dim):
         mock_fetch_github.return_value = {
             "repo_url": "https://github.com/owner/repo-name",
             "stars": 100,
@@ -143,6 +144,7 @@ class TestGitHubMetadata(unittest.TestCase):
             categories=["astro-ph.CO"],
             embedding_model="all-MiniLM-L6-v2",
         )
+
         engine.db = self.db
 
         paper = make_paper(

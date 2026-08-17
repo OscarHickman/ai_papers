@@ -1,0 +1,13 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BASH_ENV=/etc/environment
+
+# AURA - Scheduled automated jobs (UTC)
+# Daily Paper Digest Pipeline: fetch -> summarize -> retrain -> email digest
+37 6 * * * . /etc/environment; cd /app && python run.py fetch >> /app/data/cron.log 2>&1 && python run.py summarize --limit 20 >> /app/data/cron.log 2>&1 && python run.py retrain >> /app/data/cron.log 2>&1 && python run.py email-digest --top-n 3 >> /app/data/cron.log 2>&1
+
+# Weekly Brief on Mondays at 08:00 UTC
+0 8 * * 1 . /etc/environment; cd /app && python run.py weekly-brief >> /app/data/cron.log 2>&1
+
+# Daily metadata refresh at 03:00 UTC
+0 3 * * * . /etc/environment; cd /app && python run.py refresh-github-metadata >> /app/data/cron.log 2>&1

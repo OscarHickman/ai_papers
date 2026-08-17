@@ -114,13 +114,15 @@ class TestAuthorScoring(unittest.TestCase):
         self.db = PaperDatabase(self.db_path)
         
         # Patch RecommendationEngine database and embedding path
-        self.engine = RecommendationEngine(
-            data_dir=self.tmp.name,
-            categories=["astro-ph.CO"],
-            embedding_model="all-MiniLM-L6-v2"
-        )
+        with patch("aura.recommender.get_embedding_dim", return_value=384):
+            self.engine = RecommendationEngine(
+                data_dir=self.tmp.name,
+                categories=["astro-ph.CO"],
+                embedding_model="all-MiniLM-L6-v2"
+            )
         # Override the engine's db with our clean database instance
         self.engine.db = self.db
+
 
     def tearDown(self):
         self.engine.close()
@@ -192,11 +194,12 @@ class TestAuthorTrackingWebRoutes(unittest.TestCase):
         self.db = PaperDatabase(self.db_path)
         
         # Setup engine mock or real
-        self.engine = RecommendationEngine(
-            data_dir=self.tmp.name,
-            categories=["astro-ph.CO"],
-            embedding_model="all-MiniLM-L6-v2"
-        )
+        with patch("aura.recommender.get_embedding_dim", return_value=384):
+            self.engine = RecommendationEngine(
+                data_dir=self.tmp.name,
+                categories=["astro-ph.CO"],
+                embedding_model="all-MiniLM-L6-v2"
+            )
         self.engine.db = self.db
 
         with patch("aura.web.app.RecommendationEngine", return_value=self.engine):
@@ -290,12 +293,14 @@ class TestAuthorDigestAndCLI(unittest.TestCase):
         self.db_path = Path(self.tmp.name) / "papers.db"
         self.db = PaperDatabase(self.db_path)
         
-        self.engine = RecommendationEngine(
-            data_dir=self.tmp.name,
-            categories=["astro-ph.CO"],
-            embedding_model="all-MiniLM-L6-v2"
-        )
+        with patch("aura.recommender.get_embedding_dim", return_value=384):
+            self.engine = RecommendationEngine(
+                data_dir=self.tmp.name,
+                categories=["astro-ph.CO"],
+                embedding_model="all-MiniLM-L6-v2"
+            )
         self.engine.db = self.db
+
 
     def tearDown(self):
         self.engine.close()
